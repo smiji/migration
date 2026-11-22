@@ -1,0 +1,9 @@
+
+-- Phase 0: Java 8  + Spring Boot 2.5.15   (this project, as delivered)
+-- Change the Spring Boot version from 2.5.15 to Spring Boot 2.7.18
+
+Issues
+
+Circular dependencies detected
+notificationService (field private com.example.orders.service.OrderService com.example.orders.service.NotificationService.orderService)
+orderService (field private com.example.orders.service.NotificationService com.example.orders.service.OrderService.notificationService)
