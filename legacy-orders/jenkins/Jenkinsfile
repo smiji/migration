@@ -15,8 +15,10 @@ pipeline {
             }
             steps {
               dir('legacy-orders') {
+                echo "Starting ${JDK} build in ${pwd()}"
                 sh 'java -version && mvn -version'
-                sh 'mvn -B clean verify'
+                echo "Running Maven clean verify for ${JDK}"
+                sh 'mvn -B -e clean verify'
 
                 sh '''
                   set -eu
@@ -24,13 +26,17 @@ pipeline {
                   PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
                   LOG=app-$JDK.log
 
+                  echo "Starting $JDK application on port $PORT"
                   java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > "$LOG" 2>&1 &
                   echo $! > "app-$JDK.pid"
+                  echo "Application PID: $(cat "app-$JDK.pid")"
 
                   READY=false
                   for i in $(seq 1 30); do
+                    echo "Health check attempt $i/30"
                     if curl -fsS "localhost:$PORT/actuator/health" 2>/dev/null | grep -q UP; then
                       READY=true
+                      echo "Application is healthy"
                       break
                     fi
 
@@ -47,10 +53,38 @@ pipeline {
                     exit 1
                   fi
 
-                  curl -fsS "localhost:$PORT/actuator/health" | grep -q UP
-                  curl -fsS -u admin:admin123 "localhost:$PORT/api/orders" | grep -q Asha
-                  curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml" | grep -q '<customerName>'
-                  ! grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"
+                  echo "Checking health endpoint"
+                  HEALTH=$(curl -fsS "localhost:$PORT/actuator/health") || {
+                    echo "Health endpoint request failed"
+                    cat "$LOG"
+                    exit 1
+                  }
+                  echo "Health response: $HEALTH"
+                  echo "$HEALTH" | grep -q UP
+
+                  echo "Checking orders endpoint"
+                  ORDERS=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders") || {
+                    echo "Orders endpoint request failed"
+                    cat "$LOG"
+                    exit 1
+                  }
+                  echo "Orders response: $ORDERS"
+                  echo "$ORDERS" | grep -q Asha
+
+                  echo "Checking XML endpoint"
+                  XML=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml") || {
+                    echo "XML endpoint request failed"
+                    cat "$LOG"
+                    exit 1
+                  }
+                  echo "XML response: $XML"
+                  echo "$XML" | grep -q '<customerName>'
+
+                  echo "Checking application log for runtime errors"
+                  if grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"; then
+                    cat "$LOG"
+                    exit 1
+                  fi
                 '''
               }
             }
