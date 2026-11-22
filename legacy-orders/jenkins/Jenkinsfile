@@ -9,86 +9,109 @@ pipeline {
         }
         stages {
           stage('Build, test, smoke') {
-            tools {
-              jdk "${JDK}"
-              maven 'maven3'
-            }
             steps {
-              dir('legacy-orders') {
-                echo "Starting ${JDK} build in ${pwd()}"
-                sh 'java -version && mvn -version'
-                echo "Running Maven clean verify for ${JDK}"
-                sh 'mvn -B -e clean verify'
+              script {
+                echo "Preparing ${JDK} build"
+                try {
+                  def javaHome = tool name: JDK, type: 'jdk'
+                  def mavenHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
+                  echo "Using Java tool: ${javaHome}"
+                  echo "Using Maven tool: ${mavenHome}"
 
-                sh '''
-                  set -eu
+                  withEnv(["JAVA_HOME=${javaHome}", "PATH+JAVA=${javaHome}/bin", "MAVEN_HOME=${mavenHome}", "PATH+MAVEN=${mavenHome}/bin"]) {
+                    dir('legacy-orders') {
+                      echo "Starting ${JDK} build in ${pwd()}"
+                      sh 'java -version && mvn -version'
+                      echo "Running Maven clean verify for ${JDK}"
+                      sh 'mvn -B -e clean verify'
 
-                  PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
-                  LOG=app-$JDK.log
+                      sh '''
+                        set -eu
 
-                  echo "Starting $JDK application on port $PORT"
-                  java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > "$LOG" 2>&1 &
-                  echo $! > "app-$JDK.pid"
-                  echo "Application PID: $(cat "app-$JDK.pid")"
+                        PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
+                        LOG=app-$JDK.log
 
-                  READY=false
-                  for i in $(seq 1 30); do
-                    echo "Health check attempt $i/30"
-                    if curl -fsS "localhost:$PORT/actuator/health" 2>/dev/null | grep -q UP; then
-                      READY=true
-                      echo "Application is healthy"
-                      break
-                    fi
+                        echo "Starting $JDK application on port $PORT"
+                        java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > "$LOG" 2>&1 &
+                        echo $! > "app-$JDK.pid"
+                        echo "Application PID: $(cat "app-$JDK.pid")"
 
-                    if ! kill -0 "$(cat "app-$JDK.pid")" 2>/dev/null; then
-                      echo "Application exited before becoming healthy."
-                      break
-                    fi
-                    sleep 2
-                  done
+                        READY=false
+                        for i in $(seq 1 30); do
+                          echo "Health check attempt $i/30"
+                          if curl -fsS "localhost:$PORT/actuator/health" 2>/dev/null | grep -q UP; then
+                            READY=true
+                            echo "Application is healthy"
+                            break
+                          fi
 
-                  if [ "$READY" != "true" ]; then
-                    echo "Smoke test startup failed for $JDK. Application log:"
-                    cat "$LOG"
-                    exit 1
-                  fi
+                          if ! kill -0 "$(cat "app-$JDK.pid")" 2>/dev/null; then
+                            echo "Application exited before becoming healthy."
+                            break
+                          fi
+                          sleep 2
+                        done
 
-                  echo "Checking health endpoint"
-                  HEALTH=$(curl -fsS "localhost:$PORT/actuator/health") || {
-                    echo "Health endpoint request failed"
-                    cat "$LOG"
-                    exit 1
+                        if [ "$READY" != "true" ]; then
+                          echo "Smoke test startup failed for $JDK. Application log:"
+                          cat "$LOG"
+                          exit 1
+                        fi
+
+                        echo "Checking health endpoint"
+                        HEALTH=$(curl -fsS "localhost:$PORT/actuator/health") || {
+                          echo "Health endpoint request failed"
+                          cat "$LOG"
+                          exit 1
+                        }
+                        echo "Health response: $HEALTH"
+                        echo "$HEALTH" | grep -q UP
+
+                        echo "Checking orders endpoint"
+                        ORDERS=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders") || {
+                          echo "Orders endpoint request failed"
+                          cat "$LOG"
+                          exit 1
+                        }
+                        echo "Orders response: $ORDERS"
+                        echo "$ORDERS" | grep -q Asha
+
+                        echo "Checking XML endpoint"
+                        XML=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml") || {
+                          echo "XML endpoint request failed"
+                          cat "$LOG"
+                          exit 1
+                        }
+                        echo "XML response: $XML"
+                        echo "$XML" | grep -q '<customerName>'
+
+                        echo "Checking application log for runtime errors"
+                        if grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"; then
+                          cat "$LOG"
+                          exit 1
+                        fi
+                      '''
+                    }
                   }
-                  echo "Health response: $HEALTH"
-                  echo "$HEALTH" | grep -q UP
-
-                  echo "Checking orders endpoint"
-                  ORDERS=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders") || {
-                    echo "Orders endpoint request failed"
-                    cat "$LOG"
-                    exit 1
-                  }
-                  echo "Orders response: $ORDERS"
-                  echo "$ORDERS" | grep -q Asha
-
-                  echo "Checking XML endpoint"
-                  XML=$(curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml") || {
-                    echo "XML endpoint request failed"
-                    cat "$LOG"
-                    exit 1
-                  }
-                  echo "XML response: $XML"
-                  echo "$XML" | grep -q '<customerName>'
-
-                  echo "Checking application log for runtime errors"
-                  if grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"; then
-                    cat "$LOG"
-                    exit 1
-                  fi
-                '''
+                } catch (Exception e) {
+                  echo "Build, test, or smoke failed for ${JDK}: ${e.message}"
+                  throw e
+                }
               }
             }
             post {
+              failure {
+                echo "The ${JDK} branch failed. Console output above shows the last completed step."
+                script {
+                  def log = "legacy-orders/app-${JDK}.log"
+                  if (fileExists(log)) {
+                    echo "Last 200 lines of ${log}:"
+                    sh "tail -n 200 '${log}'"
+                  } else {
+                    echo "No application log was created; the failure occurred during tool setup, build, or test."
+                  }
+                }
+              }
               always {
                 dir('legacy-orders') {
                   sh '''
