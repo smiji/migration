@@ -5,36 +5,36 @@ pipeline {
     stage('JDK matrix') {
       matrix {
         axes {
-          axis { name 'JDK'; values 'jdk8', 'jdk17' }
+          axis { name 'JAVA_TOOL'; values 'jdk8', 'jdk17' }
         }
         stages {
           stage('Build, test, smoke') {
             steps {
               script {
-                echo "Preparing ${JDK} build"
+                echo "Preparing ${JAVA_TOOL} build"
                 try {
-                  def javaHome = tool name: JDK, type: 'jdk'
+                  def javaHome = tool name: JAVA_TOOL, type: 'jdk'
                   def mavenHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
                   echo "Using Java tool: ${javaHome}"
                   echo "Using Maven tool: ${mavenHome}"
 
                   withEnv(["JAVA_HOME=${javaHome}", "PATH+JAVA=${javaHome}/bin", "MAVEN_HOME=${mavenHome}", "PATH+MAVEN=${mavenHome}/bin"]) {
                     dir('legacy-orders') {
-                      echo "Starting ${JDK} build in ${pwd()}"
+                      echo "Starting ${JAVA_TOOL} build in ${pwd()}"
                       sh 'java -version && mvn -version'
-                      echo "Running Maven clean verify for ${JDK}"
+                      echo "Running Maven clean verify for ${JAVA_TOOL}"
                       sh 'mvn -B -e clean verify'
 
                       sh '''
                         set -eu
 
-                        PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
-                        LOG=app-$JDK.log
+                        PORT=$([ "$JAVA_TOOL" = "jdk8" ] && echo 18080 || echo 18017)
+                        LOG=app-$JAVA_TOOL.log
 
-                        echo "Starting $JDK application on port $PORT"
+                        echo "Starting $JAVA_TOOL application on port $PORT"
                         java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > "$LOG" 2>&1 &
-                        echo $! > "app-$JDK.pid"
-                        echo "Application PID: $(cat "app-$JDK.pid")"
+                        echo $! > "app-$JAVA_TOOL.pid"
+                        echo "Application PID: $(cat "app-$JAVA_TOOL.pid")"
 
                         READY=false
                         for i in $(seq 1 30); do
@@ -45,7 +45,7 @@ pipeline {
                             break
                           fi
 
-                          if ! kill -0 "$(cat "app-$JDK.pid")" 2>/dev/null; then
+                          if ! kill -0 "$(cat "app-$JAVA_TOOL.pid")" 2>/dev/null; then
                             echo "Application exited before becoming healthy."
                             break
                           fi
@@ -53,7 +53,7 @@ pipeline {
                         done
 
                         if [ "$READY" != "true" ]; then
-                          echo "Smoke test startup failed for $JDK. Application log:"
+                          echo "Smoke test startup failed for $JAVA_TOOL. Application log:"
                           cat "$LOG"
                           exit 1
                         fi
@@ -94,16 +94,16 @@ pipeline {
                     }
                   }
                 } catch (Exception e) {
-                  echo "Build, test, or smoke failed for ${JDK}: ${e.message}"
+                  echo "Build, test, or smoke failed for ${JAVA_TOOL}: ${e.message}"
                   throw e
                 }
               }
             }
             post {
               failure {
-                echo "The ${JDK} branch failed. Console output above shows the last completed step."
+                echo "The ${JAVA_TOOL} branch failed. Console output above shows the last completed step."
                 script {
-                  def log = "legacy-orders/app-${JDK}.log"
+                  def log = "legacy-orders/app-${JAVA_TOOL}.log"
                   if (fileExists(log)) {
                     echo "Last 200 lines of ${log}:"
                     sh "tail -n 200 '${log}'"
@@ -115,8 +115,8 @@ pipeline {
               always {
                 dir('legacy-orders') {
                   sh '''
-                    if [ -f "app-$JDK.pid" ]; then
-                      kill "$(cat "app-$JDK.pid")" 2>/dev/null || true
+                    if [ -f "app-$JAVA_TOOL.pid" ]; then
+                      kill "$(cat "app-$JAVA_TOOL.pid")" 2>/dev/null || true
                     fi
                   '''
                   junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
