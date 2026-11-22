@@ -1,20 +1,50 @@
 pipeline {
-    agent any
-    stages {
-        stage('Build') {
-            steps {
-                echo 'Building...'
-            }
+  agent any
+
+  stages {
+    stage('JDK matrix') {
+      matrix {
+        axes {
+          axis { name 'JDK'; values 'jdk8', 'jdk17' }
         }
-        stage('Test') {
-            steps {
-                echo 'Testing...'
+        stages {
+          stage('Build, test, smoke') {
+            tools {
+              jdk "${JDK}"
+              maven 'maven3'
             }
-        }
-        stage('Deploy') {
             steps {
-                echo 'Deploying...'
+              sh 'java -version && mvn -version'
+              sh 'mvn -B clean verify -Dmaven.test.failure.ignore=true'
+
+              sh '''
+                PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
+                LOG=app-$JDK.log
+
+                java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > $LOG 2>&1 &
+                echo $! > app-$JDK.pid
+
+                for i in $(seq 1 30); do
+                  curl -sf localhost:$PORT/actuator/health | grep -q UP && break
+                  sleep 2
+                done
+
+                curl -sf localhost:$PORT/actuator/health | grep -q UP
+                curl -sf -u admin:admin123 localhost:$PORT/api/orders | grep -q Asha
+                curl -sf -u admin:admin123 localhost:$PORT/api/orders/1/xml | grep -q '<customerName>'
+                ! grep -E "GenerationTarget encountered exception|APPLICATION FAILED" $LOG
+              '''
             }
+            post {
+              always {
+                sh 'kill $(cat app-$JDK.pid) 2>/dev/null || true'
+                junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+                archiveArtifacts artifacts: 'app-*.log', allowEmptyArchive: true
+              }
+            }
+          }
         }
+      }
     }
+  }
 }
