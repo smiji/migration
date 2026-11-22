@@ -14,32 +14,57 @@ pipeline {
               maven 'maven3'
             }
             steps {
-              sh 'java -version && mvn -version'
-              sh 'mvn -B clean verify -Dmaven.test.failure.ignore=true'
+              dir('legacy-orders') {
+                sh 'java -version && mvn -version'
+                sh 'mvn -B clean verify'
 
-              sh '''
-                PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
-                LOG=app-$JDK.log
+                sh '''
+                  set -eu
 
-                java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > $LOG 2>&1 &
-                echo $! > app-$JDK.pid
+                  PORT=$([ "$JDK" = "jdk8" ] && echo 18080 || echo 18017)
+                  LOG=app-$JDK.log
 
-                for i in $(seq 1 30); do
-                  curl -sf localhost:$PORT/actuator/health | grep -q UP && break
-                  sleep 2
-                done
+                  java -jar target/legacy-orders-1.0.0.jar --server.port=$PORT > "$LOG" 2>&1 &
+                  echo $! > "app-$JDK.pid"
 
-                curl -sf localhost:$PORT/actuator/health | grep -q UP
-                curl -sf -u admin:admin123 localhost:$PORT/api/orders | grep -q Asha
-                curl -sf -u admin:admin123 localhost:$PORT/api/orders/1/xml | grep -q '<customerName>'
-                ! grep -E "GenerationTarget encountered exception|APPLICATION FAILED" $LOG
-              '''
+                  READY=false
+                  for i in $(seq 1 30); do
+                    if curl -fsS "localhost:$PORT/actuator/health" 2>/dev/null | grep -q UP; then
+                      READY=true
+                      break
+                    fi
+
+                    if ! kill -0 "$(cat "app-$JDK.pid")" 2>/dev/null; then
+                      echo "Application exited before becoming healthy."
+                      break
+                    fi
+                    sleep 2
+                  done
+
+                  if [ "$READY" != "true" ]; then
+                    echo "Smoke test startup failed for $JDK. Application log:"
+                    cat "$LOG"
+                    exit 1
+                  fi
+
+                  curl -fsS "localhost:$PORT/actuator/health" | grep -q UP
+                  curl -fsS -u admin:admin123 "localhost:$PORT/api/orders" | grep -q Asha
+                  curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml" | grep -q '<customerName>'
+                  ! grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"
+                '''
+              }
             }
             post {
               always {
-                sh 'kill $(cat app-$JDK.pid) 2>/dev/null || true'
-                junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
-                archiveArtifacts artifacts: 'app-*.log', allowEmptyArchive: true
+                dir('legacy-orders') {
+                  sh '''
+                    if [ -f "app-$JDK.pid" ]; then
+                      kill "$(cat "app-$JDK.pid")" 2>/dev/null || true
+                    fi
+                  '''
+                  junit allowEmptyResults: true, testResults: 'target/surefire-reports/*.xml'
+                  archiveArtifacts artifacts: 'app-*.log', allowEmptyArchive: true
+                }
               }
             }
           }
