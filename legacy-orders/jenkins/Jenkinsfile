@@ -12,7 +12,16 @@ pipeline {
           def mvnHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
           echo "Resolved JDK home: ${jdkHome}"
           echo "Resolved Maven home: ${mvnHome}"
-          withEnv(["JAVA_HOME=${jdkHome}", "PATH+JDK=${jdkHome}/jdk8u512-b09/bin", "PATH+MVN=${mvnHome}/bin"]) {
+          def javaExecutable = sh(
+            script: "find '${jdkHome}' -type f -path '*/bin/java' -print -quit",
+            returnStdout: true
+          ).trim()
+          if (!javaExecutable) {
+            error "No Java executable found below the Jenkins JDK tool directory: ${jdkHome}"
+          }
+          def jdkInstallHome = javaExecutable.substring(0, javaExecutable.lastIndexOf('/bin/java'))
+          echo "Resolved JDK installation: ${jdkInstallHome}"
+          withEnv(["JAVA_HOME=${jdkInstallHome}", "PATH+JDK=${jdkInstallHome}/bin", "PATH+MVN=${mvnHome}/bin"]) {
             dir('legacy-orders') {
               sh '''
                 java_version=$(java -version 2>&1 | head -n 1)
