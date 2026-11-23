@@ -10,8 +10,6 @@ pipeline {
         script {
           def jdkHome = tool name: 'jdk8', type: 'hudson.model.JDK'
           def mvnHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
-          echo "Resolved JDK home: ${jdkHome}"
-          echo "Resolved Maven home: ${mvnHome}"
           def javaExecutable = sh(
             script: "find '${jdkHome}' -type f -path '*/bin/java' -print -quit",
             returnStdout: true
