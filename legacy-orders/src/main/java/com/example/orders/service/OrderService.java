@@ -54,7 +54,7 @@ public class OrderService {
         order.setStatus(OrderStatus.NEW);
         order.setCreatedAt(LocalDateTime.now());
         Order saved = repository.save(order);
-        notificationService.orderCreated(saved,countOrders());
+        notificationService.orderCreated(saved);
         return saved;
     }
 

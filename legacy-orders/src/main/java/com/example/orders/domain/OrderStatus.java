@@ -1,3 +1,3 @@
 package com.example.orders.domain;
 
-public enum OrderStatus {NEW, PAID, SHIPPED, CANCELLED}
+public enum OrderStatus { NEW, PAID, SHIPPED, CANCELLED }
