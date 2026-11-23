@@ -12,7 +12,16 @@ pipeline {
           def mvnHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
           withEnv(["JAVA_HOME=${jdkHome}", "PATH+JDK=${jdkHome}/bin", "PATH+MVN=${mvnHome}/bin"]) {
             dir('legacy-orders') {
-              sh 'java -version && mvn -version'
+              sh '''
+                java_version=$(java -version 2>&1 | head -n 1)
+                echo "Resolved JAVA_HOME=$JAVA_HOME"
+                echo "$java_version"
+                case "$java_version" in
+                  *'1.8.'*|*' 8.'*) ;;
+                  *) echo "Configured Jenkins tool 'jdk8' does not resolve to Java 8." >&2; exit 1 ;;
+                esac
+                mvn -version
+              '''
               sh 'mvn -B clean verify'
             }
           }
