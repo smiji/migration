@@ -10,6 +10,8 @@ pipeline {
         script {
           def jdkHome = tool name: 'jdk8', type: 'hudson.model.JDK'
           def mvnHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
+          echo "Resolved JDK home: ${jdkHome}"
+          echo "Resolved Maven home: ${mvnHome}"
           withEnv(["JAVA_HOME=${jdkHome}", "PATH+JDK=${jdkHome}/bin", "PATH+MVN=${mvnHome}/bin"]) {
             dir('legacy-orders') {
               sh '''
