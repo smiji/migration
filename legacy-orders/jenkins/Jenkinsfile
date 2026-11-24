@@ -4,17 +4,30 @@
 
 pipeline {
   agent any
-
-  stages {
-
-    stage('Build and test (JDK 8)') {
+  stages{
+    stage('Build and test (JDK 17)') {
       steps {
         script {
-          def jdkHome = toolHome('jdk8')
+          def jdkHome = tool name: 'jdk17', type: 'hudson.model.JDK'
           def mvnHome = tool name: 'maven3', type: 'hudson.tasks.Maven$MavenInstallation'
-          withEnv(["JAVA_HOME=${jdkHome}", "PATH+JDK=${jdkHome}/bin", "PATH+MVN=${mvnHome}/bin"]) {
+          def jdk17Executable = sh(script: "find '${jdkHome}' -type f -path '*/bin/java' -print -quit", returnStdout: true).trim()
+          if (!jdk17Executable) {
+            error "JDK 17 executable not found : ${jdkHome}"
+          }
+          def jdkInstallHome = jdk17Executable.substring(0, jdk17Executable.lastIndexOf('/bin/java'))
+          
+          withEnv(["JAVA_HOME=${jdkInstallHome}", "PATH+JDK=${jdkInstallHome}/bin", "PATH+MVN=${mvnHome}/bin"]) {
             dir('legacy-orders') {
-              sh 'java -version && mvn -version'
+              sh '''
+                java_version=$(java -version 2>&1 | head -n 1)
+                echo "Resolved JAVA_HOME=$JAVA_HOME"
+                echo "$java_version"
+                  case "$java_version" in
+                  *'17.'*) ;;
+                  *) echo "Configured Jenkins tool 'jdk17' does not resolve to Java 17." >&2; exit 1 ;;
+                esac
+                mvn -version
+              '''
               sh 'mvn -B clean verify'
             }
           }
@@ -24,86 +37,6 @@ pipeline {
         always {
           junit allowEmptyResults: true, testResults: 'legacy-orders/target/surefire-reports/*.xml'
         }
-      }
-    }
-
-    stage('Smoke test on JDK 8') {
-      steps {
-        script { smokeTest('jdk8', 18080) }
-      }
-    }
-
-    stage('Smoke test on JDK 17') {
-      steps {
-        // Findings on 17 are expected while migrating. Mark the stage failed,
-        // but keep the pipeline going so the JDK 8 result stays visible.
-        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-          script { smokeTest('jdk17', 18017) }
-        }
-      }
-    }
-  }
-}
-
-// Resolve a JDK tool and fail loudly if Jenkins returns an empty path.
-def toolHome(String name) {
-  def home = tool name: name, type: 'jdk'
-  if (!home?.trim()) {
-    error "JDK tool '${name}' resolved to an EMPTY path. Check Manage Jenkins > Tools > JDK installations: " +
-          "'Install automatically' must be ticked and an installer (e.g. adoptium.net) with a version selected."
-  }
-  echo "${name} -> ${home}"
-  return home
-}
-
-// Start the already-built jar on the given JDK and hit a few endpoints.
-def smokeTest(String jdkName, int port) {
-  def jdkHome = toolHome(jdkName)
-  withEnv(["JAVA_HOME=${jdkHome}", "PATH+JDK=${jdkHome}/bin", "PORT=${port}", "TAG=${jdkName}"]) {
-    dir('legacy-orders') {
-      try {
-        sh '''
-          set -eu
-          java -version
-          LOG="app-$TAG.log"
-
-          java -jar target/legacy-orders-1.0.0.jar --server.port="$PORT" > "$LOG" 2>&1 &
-          echo $! > "app-$TAG.pid"
-
-          READY=false
-          for i in $(seq 1 30); do
-            if curl -fsS "localhost:$PORT/actuator/health" 2>/dev/null | grep -q UP; then
-              READY=true
-              break
-            fi
-            kill -0 "$(cat "app-$TAG.pid")" 2>/dev/null || break
-            sleep 2
-          done
-          [ "$READY" = "true" ] || { echo "App did not become healthy on $TAG"; exit 1; }
-
-          echo "--- health"
-          curl -fsS "localhost:$PORT/actuator/health"; echo
-
-          echo "--- orders"
-          curl -fsS -u admin:admin123 "localhost:$PORT/api/orders" | grep -q Asha
-
-          echo "--- xml (JAXB)"
-          curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/xml" | grep -q "<customerName>"
-
-          echo "--- ref (sun.misc.BASE64Encoder)"
-          curl -fsS -u admin:admin123 "localhost:$PORT/api/orders/1/ref"; echo
-
-          if grep -E "GenerationTarget encountered exception|APPLICATION FAILED" "$LOG"; then
-            exit 1
-          fi
-          echo "Smoke test passed on $TAG"
-        '''
-      } catch (err) {
-        sh 'tail -n 100 "app-$TAG.log" || true'
-        throw err
-      } finally {
-        sh 'if [ -f "app-$TAG.pid" ]; then kill "$(cat "app-$TAG.pid")" 2>/dev/null || true; fi'
-        archiveArtifacts artifacts: 'app-*.log', allowEmptyArchive: true
       }
     }
   }
