@@ -34,7 +34,7 @@ public class Order {
 
     // TRAP: "value" is a reserved word in H2 2.x (Boot 2.7). Works on H2 1.4.200 (Boot 2.5).
     @NotNull
-    @Column(name = "value")
+    @Column(name = "value_amount")
     private BigDecimal value;
 
     @Enumerated(EnumType.STRING)

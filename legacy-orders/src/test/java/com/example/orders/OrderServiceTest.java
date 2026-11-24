@@ -44,6 +44,6 @@ class OrderServiceTest {
 
         assertEquals(OrderStatus.NEW, saved.getStatus());
         assertNotNull(saved.getCreatedAt());
-        verify(notificationService).orderCreated(saved);
+        verify(notificationService).orderCreated(saved,0);
     }
 }

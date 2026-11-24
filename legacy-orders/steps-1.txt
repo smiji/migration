@@ -7,3 +7,7 @@ Issues
 Circular dependencies detected
 notificationService (field private com.example.orders.service.OrderService com.example.orders.service.NotificationService.orderService)
 orderService (field private com.example.orders.service.NotificationService com.example.orders.service.OrderService.notificationService)
+
+package missing  - sun.misc
+
+import sun.misc.BASE64Encoder;   // TRAP: in+ternal API, removed in JDK 9

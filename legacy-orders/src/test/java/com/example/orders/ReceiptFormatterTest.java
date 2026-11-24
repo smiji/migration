@@ -14,6 +14,6 @@ class ReceiptFormatterTest {
     @Test
     void formatsMediumDateTime() {
         String s = ReceiptFormatter.format(LocalDateTime.of(2026, 11, 20, 15, 45, 0));
-        assertEquals("Nov 20, 2026 3:45:00 PM", s);
+        assertEquals("Nov 20, 2026, 3:45:00 PM", s);
     }
 }

@@ -1,13 +1,13 @@
 package com.example.orders.util;
 
-import sun.misc.BASE64Encoder;   // TRAP: internal API, removed in JDK 9
-
+   // TRAP: internal API, removed in JDK 9
+import java.util.Base64;
 public final class Base64Util {
 
     private Base64Util() {
     }
 
     public static String enc(byte[] bytes) {
-        return new BASE64Encoder().encode(bytes);
+        return Base64.getEncoder().encodeToString(bytes);
     }
 }
